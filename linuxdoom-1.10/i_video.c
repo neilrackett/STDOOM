@@ -169,15 +169,16 @@ void I_StartTic (void)
         } else if (scan == 0x62) { // Help key
             event.data1 = KEY_F11;
         } else if (scan == 0x61) { // Undo key
-            /* With the accelerator active, UNDO cycles the render mode (spy mode
-             * is multiplayer-only and unsupported). On key-down only; swallow
-             * the event so it never reaches the game. Falls through to F12/spy
-             * on the software path (no accelerator). */
+            event.data1 = KEY_F12;
+        } else if (scan == 0x66) { // Numeric keypad '*'
+            /* With the accelerator active, keypad '*' cycles the render mode. On
+             * key-down only; swallow the event so it never reaches the game.
+             * Keypad '*' has no Doom binding, so swallow it on the software path
+             * too rather than letting it reach the unknown-event handler. */
             if (c2p_md_active && event.type == ev_keydown) {
                 sidecart_c2p_cycle_render_mode(+1);
-                continue;
             }
-            event.data1 = KEY_F12;
+            continue;
         } else if (scan == 14) {
             event.data1 = KEY_BACKSPACE;
         } else if (scan == 12) {

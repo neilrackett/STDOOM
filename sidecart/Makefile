@@ -23,7 +23,7 @@ debug: tests
 
 ## Build all standalone test apps.
 .PHONY: tests
-tests: pingtest c2ptest recttest rndrtest
+tests: pingtest c2ptest recttest rndrtest uptest
 
 ## Build the standalone ping smoke test app.
 .PHONY: pingtest
@@ -59,6 +59,18 @@ rndrtest:
 		-I sidecart/tests -I linuxdoom-1.10 \
 		-o sidecart/tests/RNDRTEST.TOS \
 		sidecart/tests/rndrtest.c linuxdoom-1.10/sidecart_md.c \
+		linuxdoom-1.10/sidecart_stubs.S
+
+## Build the standalone ST->cart upload benchmark.
+## Regenerates doom_frames.h from the PNG screenshots first (host Python step,
+## stdlib only - runs on the host, not via stcmd).
+.PHONY: uptest
+uptest:
+	python3 $(ROOT_DIR)/sidecart/tests/png2chunky.py
+	ST_WORKING_FOLDER=$(ROOT_DIR) stcmd m68k-atari-mint-gcc -O2 \
+		-I sidecart/tests -I linuxdoom-1.10 \
+		-o sidecart/tests/UPTEST.TOS \
+		sidecart/tests/uptest.c linuxdoom-1.10/sidecart_md.c \
 		linuxdoom-1.10/sidecart_stubs.S
 
 ## Tag this version

@@ -1,6 +1,6 @@
-# STDOOM Turbo
+# STDOOM MD
 
-[STDOOM](https://github.com/indyjo/STDOOM) + [DOOM Accelerator](sidecart/README.md) = STDOOM Turbo
+[STDOOM](https://github.com/indyjo/STDOOM) + [DOOM Accelerator](sidecart/README.md) = STDOOM MD
 
 ![title screen](titlepic.png)
 ![screenshot](screen1.png)
@@ -70,7 +70,7 @@ If you want to use `-mfastcall`, you must ensure that all libraries, including l
 
 ## Command-line options
 
-STDOOM Turbo supports the same command-line options of the original Linuxdoom, plus:
+STDOOM MD supports the same command-line options of the original Linuxdoom, plus:
 
 - `-nomusic` disables YM-2149 soundchip music.
 - `-nosfx` disables STE DMA sound effects.

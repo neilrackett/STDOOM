@@ -29,7 +29,9 @@
 #define STDOOM_MODE_BAYER2 1
 #define STDOOM_MODE_BAYER4 2
 #define STDOOM_MODE_GREY 3
-#define STDOOM_MODE_COUNT 4
+#define STDOOM_MODE_GREY_BAYER2 4
+#define STDOOM_MODE_GREY_BAYER4 5
+#define STDOOM_MODE_COUNT 6
 
 /* Palette source for nearest/Bayer modes (must match stdoom_commands.h). */
 #define STDOOM_PALGEN_SUBSET 0

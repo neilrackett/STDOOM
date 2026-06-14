@@ -99,11 +99,11 @@ start_rom_code:
 	rts
 
 msg_ready:
-	dc.b "STDOOM Accelerator ready",$d,$a,0
+	dc.b "DOOM Accelerator ready",$d,$a,0
 	even
 
 msg_not_detected:
-	dc.b "STDOOM Accelerator not detected",$d,$a,0
+	dc.b "DOOM Accelerator not detected",$d,$a,0
 	even
 
 	even

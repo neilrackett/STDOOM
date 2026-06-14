@@ -45,7 +45,7 @@ void sidecart_c2p_install(void);
 
 /* Advance the render mode by delta (mod STDOOM_MODE_COUNT), apply it on the
  * accelerator, refresh the 16 ST colours, and announce it via the HUD. No-op
- * when the accelerator is inactive. Bound to the UNDO key in i_video.c. */
+ * when the accelerator is inactive. Bound to the keypad '*' key in i_video.c. */
 void sidecart_c2p_cycle_render_mode(int delta);
 
 /* Toggle the palette source (generated <-> fixed subset) live, apply it on the

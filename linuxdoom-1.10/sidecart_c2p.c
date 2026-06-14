@@ -47,7 +47,7 @@ int palette_gen = STDOOM_DEFAULT_PALETTE_GEN;
 /* HUD labels for each render mode, indexed by STDOOM_MODE_*. */
 static char *const s_render_mode_names[STDOOM_MODE_COUNT] = {
     "RENDER: NEAREST", "RENDER: 2x2 BAYER", "RENDER: 4x4 BAYER",
-    "RENDER: GREYSCALE"};
+    "RENDER: GREYSCALE", "RENDER: GREY 2x2 BAYER", "RENDER: GREY 4x4 BAYER"};
 
 /* HUD labels for each palette source, indexed by STDOOM_PALGEN_*. */
 static char *const s_palette_gen_names[2] = {
@@ -437,13 +437,14 @@ static void c2p_statusbar_md(unsigned char *out, const unsigned char *in,
  * Call once early in D_DoomMain (user mode, before I_Init). */
 void sidecart_c2p_init(void)
 {
-    /* -noturbo forces the pure software path: skip detection entirely so
+    /* -nosidecart forces the pure software path: skip detection entirely so
      * c2p_md_active stays 0 and everything behaves exactly as if no cartridge
-     * were present (sidecart_c2p_install no-ops, UNDO->spy / HELP->gamma kept). */
-    if (M_CheckParm("-noturbo"))
+     * were present (sidecart_c2p_install no-ops, keypad '*' swallowed, UNDO->spy
+     * / HELP->gamma kept). */
+    if (M_CheckParm("-nosidecart"))
     {
         c2p_md_active = 0;
-        printf("MD disabled (-noturbo); SW C2P\n");
+        printf("MD disabled (-nosidecart); SW C2P\n");
         return;
     }
 
@@ -513,7 +514,7 @@ void sidecart_c2p_install(void)
  * hardware colours from the firmware's new choice, and announce via the HUD.
  * The new render_mode persists to doomrc.cfg on quit (M_SaveDefaults), so the
  * last-used mode is restored next launch. No-op when the accelerator is
- * inactive (so UNDO falls through to its normal key mapping). */
+ * inactive (keypad '*' is then simply swallowed in i_video.c). */
 void sidecart_c2p_cycle_render_mode(int delta)
 {
     unsigned short stcolors[16];

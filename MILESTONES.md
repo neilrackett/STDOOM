@@ -328,7 +328,7 @@ settings persist to `doomrc.cfg`.
   16 output colours from the uploaded palette using median-cut partitioning
   followed by 8 Lloyd iterations with redmean perceptual distance. A fixed
   hand-tuned subset is available as a fallback, toggled live with the `0` key.
-- **`-noturbo`** CLI flag forces the pure software path.
+- **`-nosidecart`** CLI flag forces the pure software path.
 - All accelerated rendering (UNDO, `0`, palette toggle) announces itself via the
   standard HUD message path; messages are visible even in a shrunk view window.
 
@@ -375,6 +375,19 @@ Each frame (unchanged from M3):
 
 ## Milestone 5 — async data processing
 
+### Current status: implemented, hardware-tested, ABANDONED (2026-06-13)
+
+M5 was built and tested on hardware (saved on the `turbo-async` branch, **not**
+merged). The non-blocking dispatch plumbing worked flawlessly — the ST fired C2P
+and resumed game logic every frame — but the accelerator turned out to be
+**upload-bound, not conversion-bound**: pushing the 64000-byte chunky frame over
+the cartridge bus (~1µs/byte ≈ 64ms/frame) dominates, and async only hides the
+RP2040's *conversion* time, never the *upload*. Result: ~1.2 fps, slower than the
+~4 fps software baseline. Async cannot help while the upload is the bottleneck, so
+M5 was abandoned as a direction. This finding motivated M6's upload-optimisation
+investigation (which confirmed the upload itself cannot be meaningfully reduced for
+gameplay) and the project's renaming from "STDOOM Turbo" to **STDOOM MD**.
+
 ### Goal
 
 Decouple game-logic time from RP2040 C2P time by making C2P dispatch
@@ -419,6 +432,82 @@ justifies the added complexity.
 
 ---
 
+## Milestone 6 — upload-optimisation investigation + new C2P modes
+
+### Current status: complete (research conclusion + shipped render modes)
+
+After M5 proved the accelerator is **upload-bound**, M6 had two parts on the
+`turbo-upload-optimisation` branch (forked from M4): a time-boxed investigation of
+whether the ST→cart upload can be made meaningfully cheaper, and two new greyscale
+render modes shipped as a quality improvement. The headline outcome is the
+research conclusion that drove renaming the project from "STDOOM Turbo" to
+**STDOOM MD**: making DOOM meaningfully fast on a stock ST via this accelerator is
+not achievable, because the per-frame chunky upload is an irreducible floor for
+gameplay. The work remains valuable as a model for a future SDL XBIOS driver.
+
+### 6A. Upload-optimisation experiment (option C) — concluded
+
+Goal: make the ST→cart upload as efficient as possible, investigated **entirely as
+a standalone test `.TOS`** (no STDOOM/firmware changes). Bus transfer time is a
+pure function of byte count, so a compressed/partial byte stream sent via the
+existing `CMD_STDOOM_BLIT_ROWS` is timed faithfully with no firmware change.
+
+- **`sidecart/tests/png2chunky.py`** — host PNG→C generator (pure Python 3 stdlib:
+  zlib + full PNG unfilter), converts three real Doom screenshots (`doom_0/1/2.png`,
+  320×200 8-bit indexed) into `sidecart/tests/doom_frames.h` (generated; gitignored,
+  rebuilt on every `make uptest`).
+- **`sidecart/tests/uptest.c` → `UPTEST.TOS`** — benchmark: E1 baseline upload +
+  chunk sweep {6,3,2,1} rows (per-command overhead, ns/byte, theoretical floor);
+  E2 PackBits RLE (encode time + ratio + compressed upload); E3 dirty-row delta
+  between consecutive frames. Built via `make -C sidecart uptest`.
+
+**Conclusion: compression/skip is a dead end for gameplay — hardware-confirmed**
+(Mega STE, 16 MHz + cache, low res, 3 real frames; steady across all three):
+
+- **E1 baseline upload floor:** 64000 B in 6-row chunks = **~203 ms** (307 KB/s,
+  34 commands) — STDOOM's chunk size. Sweep: 3r 223 ms, 2r 307 ms, 1r 416 ms
+  (150 KB/s, 200 commands); ~per-command overhead **~1.28 ms**. That is a hard
+  **~4.9 fps upload ceiling** before any rendering or C2P. Chunks bigger than 6
+  rows only buy ~20% (overhead × command count) and would need a protocol-cap
+  raise — 6 rows is already near the floor.
+- **E2 PackBits RLE — net loss, decisively.** Ratios 95% / 88% / 84% match the host
+  projection (gameplay scenes are high-entropy/textured), but the 68000 **encode
+  costs ~1.7–1.8 seconds per frame** against only a ~10–30 ms upload saving, so net
+  encode+upload is **~1900–2000 ms vs the 203 ms baseline — roughly 10× slower.**
+  On-68000 compression is hopeless here.
+- **E3 dirty-row delta — net loss.** ~100% of rows change between consecutive frames
+  (200/200 then 198/200, camera/player motion), and the per-row compare adds
+  66–83 ms, so net is 270–283 ms — worse than the 203 ms baseline.
+
+The only large content-independent lever is fewer bytes/pixel (pre-reduce to 4bpp
+on the ST), but that was **explicitly rejected** by the user: it moves colour
+reduction back onto the 68000 and removes the ability to apply arbitrary
+post-processing (e.g. Bayer dither) on the RP2040, defeating the experiment.
+
+### 6B. New greyscale-dither render modes + key rebind — shipped
+
+- **Two new modes after GREYSCALE:** `STDOOM_MODE_GREY_BAYER2` (4) and
+  `STDOOM_MODE_GREY_BAYER4` (5); `STDOOM_MODE_COUNT` is now 6. They ordered-dither
+  between the two adjacent grey levels (the 16-step ramp is evenly spaced 17 apart),
+  giving a larger *effective* grey palette to reduce banding. Implemented by
+  widening the GREY branch of `stdoom_build_palette_and_lut` in `stdoom_worker.c`;
+  constants mirrored in `stdoom_commands.h` and `sidecart_md.h`; HUD names in
+  `sidecart_c2p.c` and `rndrtest.c`.
+- **Mode-switch key moved UNDO → numeric keypad `*`** (scancode 0x66, previously
+  unhandled) in `i_video.c`; UNDO reverts to plain F12.
+- **`-noturbo` CLI flag renamed `-nosidecart`.**
+
+### M6 exit criteria — met
+
+- Upload-efficiency question answered with hardware-measured numbers (baseline
+  ~203 ms/frame ≈ 4.9 fps ceiling; RLE ~10× slower via the 68000 encode cost;
+  dirty-row a net loss): the upload floor cannot be meaningfully reduced for
+  gameplay → experiment concluded.
+- Six render modes selectable at runtime via keypad `*`, persisted to `doomrc.cfg`.
+- Standalone `UPTEST.TOS` builds and runs; STDOOM builds clean with the new modes.
+
+---
+
 ## Why this approach (longer-term motivation)
 
 If the STDOOM accelerator path works well, it becomes the **model for a new Atari
@@ -451,8 +540,11 @@ make` → `atari/build/STDOOM.TOS` (+ `STDOOM20/2F.TOS`); confirm `sidecart_md.o
 
 ### Status note
 
-Milestones 1, 2 and 3 are complete and confirmed on hardware (Mega STE, 16 MHz +
-cache). Next up is Milestone 4 (richer palette + dither modes).
+Milestones 1–4 and 6 are complete and confirmed on hardware (Mega STE, 16 MHz +
+cache). Milestone 5 (async dispatch) was implemented and hardware-tested but
+abandoned: the accelerator is upload-bound, so async could not help (see M5/M6
+above). M6 concluded the upload floor is irreducible for gameplay, which is why
+the project was renamed from "STDOOM Turbo" to STDOOM MD.
 
 ## Critical files
 
@@ -555,7 +647,20 @@ the RP2040 offload approach proves fruitful beyond M5.
 
 ## Other deferred items
 
-- Resolving cartridge load timing to present "DOOM Accelerator ready" during ST boot.
+- Resolving cartridge load timing to present "DOOM Accelerator ready" during ST
+  boot. **Investigated 2026-06-15:** root cause is a **cold-boot race** — TOS scans
+  `$FA0000` for the cartridge magic very early in reset, before the bit-27 CA_INIT
+  point, and the RP2040 often hasn't established ROM emulation yet
+  (`emul_publish_rom()` runs only after RP firmware boot + clock/voltage/SELECT
+  setup, and in debug builds + UART/DPRINTF init), so the banner routine never runs.
+  The accelerator still works because STDOOM.TOS launches seconds later, by which
+  time the RP is up. The CA_INIT flag (`$08000000`, bit 27) and `target_firmware.h`
+  were verified correct/in-sync; the banner string was corrected from "STDOOM
+  Accelerator ready" to "DOOM Accelerator ready" (`target/atarist/src/main.s`,
+  regenerated `target_firmware.h`). Even so the banner only flashes before the
+  desktop clears it. **Recommended:** rely on STDOOM.TOS's own `MD detected: DOOM
+  Accelerator/1.0` startup line rather than the boot banner (runs late enough, stays
+  on screen). Reflash needed for the corrected string to reach hardware.
 
 (Dynamic palette + Bayer dither is **Milestone 4**; full-pipeline / all-screen
 offload is **Milestone 3**; non-blocking C2P dispatch is **Milestone 5**.)

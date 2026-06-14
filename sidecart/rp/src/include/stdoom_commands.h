@@ -40,7 +40,7 @@
 #define CMD_STDOOM_BLIT_ROWS 0x13
 #define CMD_STDOOM_C2P 0x14
 #define CMD_STDOOM_SET_PALETTE 0x15 /* Upload 768B (256xRGB) DOOM palette (M4) */
-#define CMD_STDOOM_SET_MODE 0x16    /* d3=render mode 0..3 (M4) */
+#define CMD_STDOOM_SET_MODE 0x16    /* d3=render mode 0..5 (M4) */
 #define CMD_STDOOM_SET_PALGEN 0x17  /* d3=palette source 0/1 (M4 Stage 3) */
 /* 0x18..0x1F reserved for future render offload (column/span, palette FX). */
 
@@ -49,7 +49,9 @@
 #define STDOOM_MODE_BAYER2 1
 #define STDOOM_MODE_BAYER4 2
 #define STDOOM_MODE_GREY 3
-#define STDOOM_MODE_COUNT 4
+#define STDOOM_MODE_GREY_BAYER2 4 /* greyscale, 2x2 dither between grey levels */
+#define STDOOM_MODE_GREY_BAYER4 5 /* greyscale, 4x4 dither between grey levels */
+#define STDOOM_MODE_COUNT 6
 
 /* ── Palette source (M4 Stage 3) ────────────────────────────────────────── */
 /* Where the 16 ST colours come from for nearest/Bayer modes (greyscale always

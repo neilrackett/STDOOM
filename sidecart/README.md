@@ -42,13 +42,26 @@ You'll know if the microfirmware is working because you'll see "DOOM Accelerator
   `CMD_STDOOM_SET_PALETTE` replaces `CMD_STDOOM_SET_MAP`; the RP2040 now owns all
   colour reduction (median-cut + k-means palette generation, or a fixed hand-tuned
   subset) and returns the chosen 16 ST colours for the host to apply directly to
-  the hardware palette registers. Four render modes switchable at runtime via UNDO
-  key: nearest-colour, 2×2 Bayer, 4×4 Bayer, greyscale. Confirmed on Mega STE at
+  the hardware palette registers. Four render modes switchable at runtime:
+  nearest-colour, 2×2 Bayer, 4×4 Bayer, greyscale. Confirmed on Mega STE at
   16 MHz + cache. Palette selection quality will be further refined in a future
   pass. `sidecart/tests/RNDRTEST.TOS` validates the palette pipeline standalone.
-- **Milestone 5 (next):** async data processing — non-blocking C2P dispatch; the
-  ST fires C2P and returns to game logic immediately, synchronising only at vsync
-  before the planar copy. No extra memory; `sidecart_stubs.S` unchanged.
+- **Milestone 5 (abandoned):** async data processing — non-blocking C2P dispatch.
+  Built and hardware-tested (saved on the `turbo-async` branch, not merged): the
+  plumbing worked, but the accelerator is **upload-bound, not conversion-bound**,
+  so hiding the RP2040's conversion behind game logic gave ~1.2 fps (slower than
+  the ~4 fps software baseline). Abandoned as a direction.
+- **Milestone 6 (done, hardware-confirmed):** upload-optimisation investigation +
+  new C2P modes. A standalone `UPTEST.TOS` benchmark (`make -C sidecart uptest`)
+  measured the upload path on real Doom frames (Mega STE, 16 MHz + cache) and
+  confirmed the upload floor is **irreducible for gameplay**: the baseline upload is
+  **~203 ms/frame** (307 KB/s, 6-row chunks) — a ~4.9 fps ceiling before any render
+  or C2P; PackBits RLE saves only 5–16% of bytes but its 68000 encode costs
+  **~1.8 s/frame** (~10× slower net); and dirty-row deltas change ~100% of rows
+  frame-to-frame (a net loss). This is why the project was renamed from "STDOOM
+  Turbo" to STDOOM MD. Two new greyscale-dither render modes (GREY 2×2 / 4×4 Bayer)
+  were shipped for finer grey gradation; the mode-switch key moved from UNDO to the
+  numeric keypad `*`, and `-noturbo` was renamed `-nosidecart`.
 
 Longer term, this accelerator design is intended as the model for a new (clean)
 Atari ST SDL XBIOS driver.

@@ -4,13 +4,13 @@
  * Uploads a 768-byte (256xRGB) test palette and a 320x200 chunky image showing
  * a 16x16 grid of all 256 palette indices, then renders it through the RP2040.
  * Pressing any key cycles the render mode (NEAREST -> 2x2 BAYER -> 4x4 BAYER ->
- * GREYSCALE), which re-derives the 16 ST colours on the firmware; the test reads
- * them back, loads the hardware palette registers, re-runs C2P and re-displays.
- * ESC quits.
+ * GREYSCALE -> GREY 2x2 BAYER -> GREY 4x4 BAYER), which re-derives the 16 ST
+ * colours on the firmware; the test reads them back, loads the hardware palette
+ * registers, re-runs C2P and re-displays. ESC quits.
  *
- * This exercises the full M4 path (SET_PALETTE + readback + SET_MODE + all four
- * modes) on a known 256-colour image, in isolation, before relying on it in
- * STDOOM.
+ * This exercises the full M4 path (SET_PALETTE + readback + SET_MODE + all
+ * render modes) on a known 256-colour image, in isolation, before relying on it
+ * in STDOOM.
  *
  * Build (from repo root):
  *   make -C sidecart rndrtest
@@ -25,7 +25,8 @@
 #define CELL_H 12u  /* rows are scaled to fill 200 (see fill_grid_frame)        */
 
 static const char *s_mode_names[STDOOM_MODE_COUNT] = {
-    "NEAREST", "2x2 BAYER", "4x4 BAYER", "GREYSCALE"};
+    "NEAREST",   "2x2 BAYER",     "4x4 BAYER",
+    "GREYSCALE", "GREY 2x2 BAYER", "GREY 4x4 BAYER"};
 
 static const char *s_palgen_names[2] = {"FIXED", "GENERATED"};
 

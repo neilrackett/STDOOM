@@ -433,12 +433,23 @@ static void stdoom_build_refs(void) {
  * current render mode, from the last uploaded palette (s_palette_rgb).
  *
  * NEAREST/BAYER2/BAYER4 use the fixed s_subset[] palette (matching the M3
- * look); GREY generates its own 16-step grey ramp. Bayer modes do a classic
- * 2-colour ordered dither between each DOOM colour's nearest and second-nearest
- * ST colours, thresholded per Bayer cell. (Median-cut palette generation is
- * Stage 3.) */
+ * look); GREY / GREY_BAYER2 / GREY_BAYER4 generate their own 16-step grey ramp.
+ * Bayer modes do a classic 2-colour ordered dither between each DOOM colour's
+ * nearest and second-nearest ST colours, thresholded per Bayer cell; the
+ * greyscale Bayer modes dither between the two adjacent grey levels instead, to
+ * give a larger effective grey palette and reduce banding. (Median-cut palette
+ * generation is Stage 3.) */
 static void stdoom_build_palette_and_lut(void) {
-  if (s_render_mode == STDOOM_MODE_GREY) {
+  if (s_render_mode == STDOOM_MODE_GREY ||
+      s_render_mode == STDOOM_MODE_GREY_BAYER2 ||
+      s_render_mode == STDOOM_MODE_GREY_BAYER4) {
+    /* Greyscale Bayer variants dither between adjacent grey levels; pick the
+     * matching 2x2/4x4 threshold matrix (plain GREY does no dither). */
+    int grey_dither = (s_render_mode != STDOOM_MODE_GREY);
+    int bayer_mode = (s_render_mode == STDOOM_MODE_GREY_BAYER2)
+                         ? STDOOM_MODE_BAYER2
+                         : STDOOM_MODE_BAYER4;
+
     /* 16-step grey ramp: level k -> grey value k*17 (0..255). */
     for (uint8_t k = 0; k < 16u; k++) {
       uint8_t v = (uint8_t)(k * 17u);
@@ -450,9 +461,21 @@ static void stdoom_build_palette_and_lut(void) {
     for (uint32_t i = 0; i < 256u; i++) {
       const uint8_t *c = &s_palette_rgb[i * 3u];
       uint8_t y = stdoom_luma(c[0], c[1], c[2]);
-      uint8_t level = (uint8_t)(((uint32_t)y * 15u + 127u) / 255u);
-      for (uint8_t cell = 0; cell < 16u; cell++) {
-        s_mode_lut[cell][i] = level;
+      if (!grey_dither) {
+        uint8_t level = (uint8_t)(((uint32_t)y * 15u + 127u) / 255u);
+        for (uint8_t cell = 0; cell < 16u; cell++) {
+          s_mode_lut[cell][i] = level;
+        }
+      } else {
+        /* Grey levels are evenly spaced 17 apart, so the luma maps to a lower
+         * level lo and a 0..16 fraction towards lo+1; dither on that fraction. */
+        uint8_t lo = (uint8_t)(y / 17u);                 /* 0..15 */
+        uint8_t hi = (uint8_t)((lo < 15u) ? lo + 1u : 15u);
+        int t16 = (int)y - (int)((uint16_t)lo * 17u);    /* 0..16 */
+        for (uint8_t cell = 0; cell < 16u; cell++) {
+          uint8_t thr = stdoom_dither_threshold(bayer_mode, cell);
+          s_mode_lut[cell][i] = (uint8_t)((t16 > (int)thr) ? hi : lo);
+        }
       }
     }
     return;
