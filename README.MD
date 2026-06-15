@@ -37,6 +37,34 @@ TOS files and microfirmware are available from the [releases page](https://githu
 - Music playback using the YM-2149 soundchip (work in progress).
 - Controllable with keyboard and mouse.
 
+### DOOM Accelerator
+
+With a [SidecarTridge Multi-device](https://sidecartridge.com) running the [DOOM Accelerator](sidecart/README.md) firmware, the chunky-to-planar conversion and all 16-colour reduction are offloaded to the RP2040, and the look is selectable at runtime from the numeric keypad (your choice persists in `doomrc.cfg`):
+
+- **Keypad `*`** — cycle the **dither mode**.
+- **Keypad `/`** — cycle the **palette** (the 16 on-screen colours).
+
+When the view is shrunk (smaller window), the RP2040 scales it up to fill the viewport with an even border — so smaller views look full-size _and_ run faster, because fewer pixels are uploaded each frame.
+
+| Keypad `*` — dither | Description                           |
+| ------------------- | ------------------------------------- |
+| Nearest             | Closest palette colour, no dithering  |
+| 2×2 Bayer           | Ordered dither, 2×2 matrix            |
+| 4×4 Bayer           | Ordered dither, 4×4 matrix            |
+| Halftone            | 4×4 clustered-dot ("newspaper print") |
+
+| Keypad `/` — palette | Description                                |
+| -------------------- | ------------------------------------------ |
+| Fixed                | Hand-tuned subset of the DOOM palette      |
+| Generated            | Median-cut + k-means from the live palette |
+| EGA                  | IBM EGA 16 colours                         |
+| C64                  | Commodore 64                               |
+| Spectrum             | ZX Spectrum                                |
+| PICO-8               | PICO-8 fantasy console                     |
+| Greyscale            | 16-step grey ramp                          |
+
+Each dither mode combines with any palette.
+
 ### Not implemented
 
 - Network gameplay

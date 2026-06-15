@@ -47,11 +47,12 @@ int palette_gen = STDOOM_DEFAULT_PALETTE_GEN;
 /* HUD labels for each render mode, indexed by STDOOM_MODE_*. */
 static char *const s_render_mode_names[STDOOM_MODE_COUNT] = {
     "RENDER: NEAREST", "RENDER: 2x2 BAYER", "RENDER: 4x4 BAYER",
-    "RENDER: GREYSCALE", "RENDER: GREY 2x2 BAYER", "RENDER: GREY 4x4 BAYER"};
+    "RENDER: HALFTONE"};
 
 /* HUD labels for each palette source, indexed by STDOOM_PALGEN_*. */
-static char *const s_palette_gen_names[2] = {
-    "PALETTE: FIXED", "PALETTE: GENERATED"};
+static char *const s_palette_gen_names[STDOOM_PALGEN_COUNT] = {
+    "PALETTE: FIXED", "PALETTE: GENERATED", "PALETTE: EGA", "PALETTE: C64",
+    "PALETTE: SPECTRUM", "PALETTE: PICO-8", "PALETTE: GREYSCALE"};
 
 /*
  * STE blitter registers (fast copy path from ROM4 slot 0 to ST screen RAM).
@@ -285,11 +286,6 @@ static void c2p_screen_md(unsigned char *out, const unsigned char *in)
             unsigned short vy = (unsigned short)viewwindowy;
             unsigned short vw = (unsigned short)scaledviewwidth;
             unsigned short vh = (unsigned short)viewheight;
-            /* M7 magnify factor: exactly 160px -> 2x, 80px -> 4x (the two view
-             * sizes the software path zooms cleanly); any other width stays 1:1
-             * (today's in-place partial path, with the GRNROCK border). */
-            unsigned short scale = (vw == SCREENWIDTH / 2) ? 2
-                                 : (vw == SCREENWIDTH / 4) ? 4 : 1;
 
             /* Border-frame detection.  When the view is shrunk
              * (scaledviewwidth < 320) Doom draws the GRNROCK border around the
@@ -306,31 +302,20 @@ static void c2p_screen_md(unsigned char *out, const unsigned char *in)
             static unsigned short s_pvx, s_pvy, s_pvw, s_pvh;
             static int s_border_full_frames;
 
-            /* Magnified zoom (M7): upload only the small centred view (the same
-             * rows the 1:1 partial path already uploads — no extra upload
-             * cost), have the RP2040 upscale it to fill the 320 x (vh*scale)
-             * play area, and copy it full-width via the linear-blit fast path.
-             * No border burst is needed: the whole play area is overwritten.
-             * The status bar is left to c2p_statusbar_md (c2p_md_frame_offloaded
-             * stays 0). */
-            if (scale > 1)
-            {
-                s_prev_in_partial_branch = 1;
-                if (upload_rows((short)vy, (short)vh, in) != 0)
-                {
-                    c2p_screen_lorez(out, in);
-                    return;
-                }
-                if (sidecart_md_c2p_scaled(vx, vy, vw, vh, scale) != 0)
-                {
-                    c2p_screen_lorez(out, in);
-                    return;
-                }
-                sidecart_md_copy_planar_to_screen(
-                    (unsigned long)STDOOM_PLANAR0_ADDR, out, 0, 0,
-                    STDOOM_FRAME_WIDTH, (unsigned short)(vh * scale));
-                return;
-            }
+            /* Display target.  Views at/above the first bordered size (size 9,
+             * scaledviewwidth == STDOOM_FRAME_VIEW_W) render 1:1 in their native
+             * centred rect; smaller, faster renders are nearest-neighbour
+             * upscaled INTO the size-9 frame so every shrunk size shows the same
+             * even GRNROCK border (which Doom draws into screens[0] around the
+             * view) with the HUD message in the top border.  The border comes
+             * from the full-frame burst below and persists on screen between
+             * bursts; per-frame we only repaint the view rect + the message
+             * strip, leaving the surrounding border untouched. */
+            int upscale = (vw < STDOOM_FRAME_VIEW_W);
+            unsigned short dx = (unsigned short)(upscale ? STDOOM_FRAME_VIEW_X : vx);
+            unsigned short dy = (unsigned short)(upscale ? STDOOM_FRAME_VIEW_Y : vy);
+            unsigned short dw = (unsigned short)(upscale ? STDOOM_FRAME_VIEW_W : vw);
+            unsigned short dh = (unsigned short)(upscale ? STDOOM_FRAME_VIEW_H : vh);
 
             if (!s_prev_in_partial_branch ||
                 vx != s_pvx || vy != s_pvy || vw != s_pvw || vh != s_pvh)
@@ -340,25 +325,25 @@ static void c2p_screen_md(unsigned char *out, const unsigned char *in)
 
             if (s_border_full_frames > 0)
             {
-                /* Fall through to the full-frame path below (covers the
+                /* Fall through to the full-frame path below (draws the GRNROCK
                  * border and the status bar). */
                 s_border_full_frames--;
             }
             else
             {
-                /* The top HUD message line (y=0) sits above the 3D viewport and
-                 * is otherwise never repainted in the partial path, so an active
-                 * message (pickups, "RENDER:"/"PALETTE:") would never reach the
-                 * screen. Push that thin top strip while a message is showing,
-                 * plus a couple of frames after so the erase reaches the screen
-                 * too. Skipped when the viewport already starts at the top. */
+                /* Repaint the top HUD message strip (Doom draws messages at
+                 * y=0): pickups, "RENDER:"/"PALETTE:".  In the framed/upscaled
+                 * layout it sits in the top border; the view copy below
+                 * overwrites any overlap.  Push it while a message shows plus a
+                 * couple of frames after (to erase).  Skipped when the view
+                 * starts at the top (full-width size 10, dy==0). */
                 static int s_msg_strip_frames;
                 if (HU_MessageActive())
                     s_msg_strip_frames = 2;
                 if (s_msg_strip_frames > 0)
                 {
                     s_msg_strip_frames--;
-                    if (vy > 0)
+                    if (dy > 0)
                     {
                         if (upload_rows(0, MD_MSG_STRIP_ROWS, in) != 0 ||
                             sidecart_md_c2p_rect(0, 0, STDOOM_FRAME_WIDTH,
@@ -373,18 +358,22 @@ static void c2p_screen_md(unsigned char *out, const unsigned char *in)
                     }
                 }
 
+                /* Upload only the rendered view rows (no extra upload cost),
+                 * then upscale into the size-9 frame (smaller sizes) or convert
+                 * 1:1 (sizes 9/10), and copy the display rect. */
                 if (upload_rows((short)vy, (short)vh, in) != 0)
                 {
                     c2p_screen_lorez(out, in);
                     return;
                 }
-                if (sidecart_md_c2p_rect(vx, vy, vw, vh) != 0)
+                if ((upscale ? sidecart_md_c2p_upscale(vx, vy, vw, vh)
+                             : sidecart_md_c2p_rect(vx, vy, vw, vh)) != 0)
                 {
                     c2p_screen_lorez(out, in);
                     return;
                 }
                 sidecart_md_copy_planar_to_screen(
-                    (unsigned long)STDOOM_PLANAR0_ADDR, out, vx, vy, vw, vh);
+                    (unsigned long)STDOOM_PLANAR0_ADDR, out, dx, dy, dw, dh);
                 /* Status bar is NOT covered — c2p_statusbar_md must handle it. */
                 return;
             }
@@ -493,8 +482,7 @@ void sidecart_c2p_init(void)
          * colours (rebuilt for this mode + palette source). */
         if (render_mode < 0 || render_mode >= STDOOM_MODE_COUNT)
             render_mode = STDOOM_DEFAULT_RENDER_MODE;
-        if (palette_gen != STDOOM_PALGEN_SUBSET &&
-            palette_gen != STDOOM_PALGEN_GENERATED)
+        if (palette_gen < 0 || palette_gen >= STDOOM_PALGEN_COUNT)
             palette_gen = STDOOM_DEFAULT_PALETTE_GEN;
         mode_rc = (init_rc == 0) ? sidecart_md_set_mode(render_mode) : -1;
         /* Set the palette source before the first SET_PALETTE so the initial
@@ -571,10 +559,11 @@ void sidecart_c2p_cycle_render_mode(int delta)
     players[consoleplayer].message = s_render_mode_names[mode];
 }
 
-/* Toggle the palette source (generated <-> fixed subset), apply it on the
- * firmware, refresh the 16 ST hardware colours from the firmware's new choice,
- * and announce via the HUD. The new palette_gen persists to doomrc.cfg on quit.
- * No-op when the accelerator is inactive. */
+/* Cycle the palette source (generated, subset, then the fixed EGA / C64 /
+ * Spectrum / PICO-8 palettes), apply it on the firmware, refresh the 16 ST
+ * hardware colours from the firmware's new choice, and announce via the HUD.
+ * The new palette_gen persists to doomrc.cfg on quit. No-op when the accelerator
+ * is inactive. */
 void sidecart_c2p_toggle_palette_gen(void)
 {
     unsigned short stcolors[16];
@@ -583,8 +572,7 @@ void sidecart_c2p_toggle_palette_gen(void)
     if (!c2p_md_active)
         return;
 
-    gen = (palette_gen == STDOOM_PALGEN_GENERATED) ? STDOOM_PALGEN_SUBSET
-                                                   : STDOOM_PALGEN_GENERATED;
+    gen = (palette_gen + 1) % STDOOM_PALGEN_COUNT;
 
     if (sidecart_md_set_palgen(gen) != 0)
         return; /* leave the current source/colours untouched on failure */

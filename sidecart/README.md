@@ -62,6 +62,17 @@ You'll know if the microfirmware is working because you'll see "DOOM Accelerator
   Turbo" to STDOOM MD. Two new greyscale-dither render modes (GREY 2×2 / 4×4 Bayer)
   were shipped for finer grey gradation; the mode-switch key moved from UNDO to the
   numeric keypad `*`, and `-noturbo` was renamed `-nosidecart`.
+- **Milestone 7 (done, hardware-confirmed):** viewport scaling + palette/render
+  expansion. When the gameplay view is shrunk, the RP2040 nearest-neighbour
+  upscales the small (fast) 68000 render into the size-9 framed layout — every
+  size fills the viewport with an even GRNROCK border and the HUD message in the
+  top border, **at no extra upload cost**, so smaller views run faster (the one
+  lever that makes the accelerator beat software, since M6 showed the full-frame
+  upload is the floor). The render key (keypad `*`) selects the dither style
+  (nearest / 2×2 / 4×4 Bayer / halftone) and the palette key (keypad `/`) selects
+  the 16-colour set (hand-tuned, generated, EGA, C64, ZX Spectrum, PICO-8,
+  greyscale); both persist. The "DOOM Accelerator ready" boot banner now shows
+  with a release build.
 
 Longer term, this accelerator design is intended as the model for a new (clean)
 Atari ST SDL XBIOS driver.

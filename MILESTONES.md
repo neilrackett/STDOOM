@@ -508,6 +508,88 @@ post-processing (e.g. Bayer dither) on the RP2040, defeating the experiment.
 
 ---
 
+## Milestone 7 — viewport scaling (RP2040 upscale) + palette/render expansion
+
+### Current status: complete (confirmed on hardware, Mega STE 16 MHz + cache, 2026-06-15)
+
+The headline of M7 is **RP2040-side viewport scaling**: when the player shrinks
+the gameplay view, the host uploads only the small (fast) 68000 render and the
+RP2040 nearest-neighbour-upscales it to fill the viewport. This is the one lever
+that makes the accelerator genuinely *faster* than software (M6 proved the
+full-frame upload is the floor): a smaller view uploads fewer rows **and** renders
+fewer 3D pixels, so framerate climbs as the view shrinks — at the smallest sizes
+only a few KB are pushed per frame. A batch of "for fun" palette/dither additions
+rides along.
+
+### 7A. Viewport scaling — framed nearest-neighbour upscale
+
+- New firmware `stdoom_pack_to_planar_upscale()` (CMD_STDOOM_C2P, magnify flag in
+  the spare low nibble of `rx` — no `sidecart_stubs.S` change): reads the small
+  centred source rect `(viewwindowx, viewwindowy, scaledviewwidth, viewheight)`
+  and nearest-neighbour-magnifies it (16.16 fixed-point per-axis step) INTO the
+  fixed **size-9 framed view rect** `STDOOM_FRAME_VIEW_*` = `(16,10,288,148)` of
+  planar slot 0, leaving the surrounding GRNROCK border untouched.
+- Host `c2p_screen_md`: `scaledviewwidth < 288` (smaller than size 9) → framed
+  upscale; sizes 9/10 render 1:1 in place; full-screen / non-gameplay → full-frame.
+  The GRNROCK border (which Doom already draws into `screens[0]`) is established by
+  the existing border-burst and persists in the slot / on screen between bursts;
+  per frame only the upscaled view rect + the top message strip are repainted.
+- The HUD message sits in the 10px top border (8px font fits) so pickups /
+  RENDER:/PALETTE: are visible while zoomed. Every shrunk size looks like vanilla
+  Doom's framed view (even GRNROCK border; no bevel, deliberately).
+- **No extra upload cost** — the same view rows the 1:1 partial path already
+  uploads; the scaling happens on the RP2040.
+
+### 7B. Palette + render expansion (for fun)
+
+- **Render-mode axis (keypad `*`)** is now just the dither style: NEAREST, 2×2
+  Bayer, 4×4 Bayer, and new **HALFTONE** (4×4 clustered-dot — a dot grows from
+  each cell centre, "newspaper print"). `STDOOM_MODE_COUNT` = 4.
+- **Palette axis (keypad `/`, moved from `0`)** is the 16-colour set: hand-tuned
+  SUBSET, median-cut GENERATED, fixed **EGA / C64 / ZX Spectrum / PICO-8**, and
+  **GREYSCALE** (16-grey ramp). `STDOOM_PALGEN_COUNT` = 7. Each palette combines
+  with any dither mode; both persist to `doomrc.cfg`.
+- **Greyscale demoted from a render mode to a palette.** The dedicated luma grey
+  path (and `stdoom_luma`) was removed: a 16-grey ramp through the normal
+  nearest/Bayer reduction reproduces it, because the reduction's redmean distance
+  is green-weighted ≈ luma. So grey + nearest = old GREYSCALE; grey + 2×2/4×4 =
+  old GREY_BAYER2/4. Net: the two axes are cleanly orthogonal and the firmware is
+  simpler.
+- Fixed external palettes are `const uint8_t[16][3]` tables in `stdoom_worker.c`,
+  sourced into `stdoom_build_refs()`; the 16 ST colours become the famous palette
+  and each DOOM colour maps to its nearest entry.
+- The firmware FIXED palette `s_subset[]` was **re-synced** to the current
+  `atari_c2p.c` `subset_lorez[]` (it had drifted out of sync).
+
+### Hard-won / do-not-regress
+
+- The upscale writes **only** the framed view rect; the GRNROCK border, top
+  message strip and status bar are composited from other writes that persist in
+  the slot / on screen between border-bursts. Do **not** make the upscale fill the
+  whole play area (that's the earlier borderless variant the user rejected).
+- The framed copy is the size-9 sub-rect (→ CPU copy on STE, like size 9 already
+  does); full-width copies still use the reliable linear blit.
+- Keep in sync: `STDOOM_MODE_*`/`COUNT`, `STDOOM_PALGEN_*`/`COUNT` and
+  `STDOOM_FRAME_VIEW_*` between `stdoom_commands.h` and `sidecart_md.h`;
+  `s_subset[]` ↔ `atari_c2p.c subset_lorez[]`.
+
+### Boot banner (resolved)
+
+The "DOOM Accelerator ready" cartridge boot banner now shows with a **release**
+firmware — the debug build's `stdio_init_all()` + DPRINTFs ran before
+`emul_publish_rom()` and lost the cold-boot race to TOS's cartridge scan; release
+publishes ROM in time. String corrected STDOOM→DOOM. (See the deferred-items note.)
+
+### M7 exit criteria — met (hardware-confirmed 2026-06-15)
+
+- Every shrunk view size fills the viewport with an even GRNROCK border and the
+  HUD message in the top border; smaller sizes run faster (less upload + render).
+- Render (keypad `*`): NEAREST / 2×2 / 4×4 Bayer / HALFTONE. Palette (keypad `/`):
+  SUBSET / GENERATED / EGA / C64 / SPECTRUM / PICO-8 / GREYSCALE. Both persist.
+- Host + firmware + `RNDRTEST.TOS` build clean; confirmed on Mega STE.
+
+---
+
 ## Why this approach (longer-term motivation)
 
 If the STDOOM accelerator path works well, it becomes the **model for a new Atari
@@ -540,11 +622,14 @@ make` → `atari/build/STDOOM.TOS` (+ `STDOOM20/2F.TOS`); confirm `sidecart_md.o
 
 ### Status note
 
-Milestones 1–4 and 6 are complete and confirmed on hardware (Mega STE, 16 MHz +
+Milestones 1–4, 6 and 7 are complete and confirmed on hardware (Mega STE, 16 MHz +
 cache). Milestone 5 (async dispatch) was implemented and hardware-tested but
 abandoned: the accelerator is upload-bound, so async could not help (see M5/M6
-above). M6 concluded the upload floor is irreducible for gameplay, which is why
-the project was renamed from "STDOOM Turbo" to STDOOM MD.
+above). M6 concluded the upload floor is irreducible for gameplay at full
+resolution, which is why the project was renamed from "STDOOM Turbo" to STDOOM MD.
+M7 added RP2040-side viewport scaling — the one lever that does help, since a
+smaller view uploads and renders fewer pixels — plus fixed palette presets,
+halftone dither, and the render/palette axis split.
 
 ## Critical files
 
@@ -647,20 +732,18 @@ the RP2040 offload approach proves fruitful beyond M5.
 
 ## Other deferred items
 
-- Resolving cartridge load timing to present "DOOM Accelerator ready" during ST
-  boot. **Investigated 2026-06-15:** root cause is a **cold-boot race** — TOS scans
-  `$FA0000` for the cartridge magic very early in reset, before the bit-27 CA_INIT
-  point, and the RP2040 often hasn't established ROM emulation yet
-  (`emul_publish_rom()` runs only after RP firmware boot + clock/voltage/SELECT
-  setup, and in debug builds + UART/DPRINTF init), so the banner routine never runs.
-  The accelerator still works because STDOOM.TOS launches seconds later, by which
-  time the RP is up. The CA_INIT flag (`$08000000`, bit 27) and `target_firmware.h`
-  were verified correct/in-sync; the banner string was corrected from "STDOOM
-  Accelerator ready" to "DOOM Accelerator ready" (`target/atarist/src/main.s`,
-  regenerated `target_firmware.h`). Even so the banner only flashes before the
-  desktop clears it. **Recommended:** rely on STDOOM.TOS's own `MD detected: DOOM
-  Accelerator/1.0` startup line rather than the boot banner (runs late enough, stays
-  on screen). Reflash needed for the corrected string to reach hardware.
+- Cartridge load timing for the "DOOM Accelerator ready" boot banner —
+  **RESOLVED 2026-06-15: shows correctly with a RELEASE build.** Root cause was a
+  **cold-boot race**: TOS scans `$FA0000` for the cartridge magic very early in
+  reset (before the bit-27 CA_INIT point), and a **debug** firmware ran
+  `stdio_init_all()` + DPRINTFs before `emul_publish_rom()`, so the RP2040 hadn't
+  established ROM emulation in time and the banner routine never ran. A release
+  build skips that latency, publishes ROM in time, and prints the banner. The
+  CA_INIT flag (`$08000000`, bit 27) and `target_firmware.h` were verified
+  correct/in-sync, and the string was corrected "STDOOM Accelerator …" → "DOOM
+  Accelerator …" (`target/atarist/src/main.s` + regenerated `target_firmware.h`).
+  STDOOM.TOS's own `MD detected: DOOM Accelerator/1.0` startup line remains the
+  fallback if a debug build is ever shipped.
 
 (Dynamic palette + Bayer dither is **Milestone 4**; full-pipeline / all-screen
 offload is **Milestone 3**; non-blocking C2P dispatch is **Milestone 5**.)

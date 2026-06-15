@@ -24,23 +24,37 @@
 #define CMD_STDOOM_SET_MODE 0x0016
 #define CMD_STDOOM_SET_PALGEN 0x0017
 
-/* Render modes (must match stdoom_commands.h). */
+/* Render modes (dither style; must match stdoom_commands.h). */
 #define STDOOM_MODE_NEAREST 0
 #define STDOOM_MODE_BAYER2 1
 #define STDOOM_MODE_BAYER4 2
-#define STDOOM_MODE_GREY 3
-#define STDOOM_MODE_GREY_BAYER2 4
-#define STDOOM_MODE_GREY_BAYER4 5
-#define STDOOM_MODE_COUNT 6
+#define STDOOM_MODE_HALFTONE 3
+#define STDOOM_MODE_COUNT 4
 
-/* Palette source for nearest/Bayer modes (must match stdoom_commands.h). */
+/* Palette source / 16-colour set (must match stdoom_commands.h). */
 #define STDOOM_PALGEN_SUBSET 0
 #define STDOOM_PALGEN_GENERATED 1
+/* Fixed external 16-colour palettes (just for fun). MUST match stdoom_commands.h. */
+#define STDOOM_PALGEN_EGA 2
+#define STDOOM_PALGEN_C64 3
+#define STDOOM_PALGEN_ZX 4
+#define STDOOM_PALGEN_PICO8 5
+#define STDOOM_PALGEN_GREY 6
+#define STDOOM_PALGEN_COUNT 7
 
 /* STDOOM low-res frame geometry. */
 #define STDOOM_FRAME_WIDTH 320
 #define STDOOM_FRAME_HEIGHT 200
 #define STDOOM_CHUNKY_SIZE (STDOOM_FRAME_WIDTH * STDOOM_FRAME_HEIGHT)
+
+/* Framed-upscale target (Milestone 7): Doom's size-9 view layout (the first
+ * view size that shows the GRNROCK border).  Shrunk views smaller than this are
+ * nearest-neighbour upscaled into this rect so every size shares the same even
+ * border.  MUST match the same defines in sidecart/rp/.../stdoom_commands.h. */
+#define STDOOM_FRAME_VIEW_X 16
+#define STDOOM_FRAME_VIEW_Y 10
+#define STDOOM_FRAME_VIEW_W 288
+#define STDOOM_FRAME_VIEW_H 148
 #define STDOOM_PLANAR_SIZE 32000
 
 /* PING magic — sent in d3. The firmware echoes the random token for any PING,
@@ -151,22 +165,22 @@ int sidecart_md_c2p_rect(unsigned short x, unsigned short y,
 int sidecart_md_c2p(void);
 
 /**
- * @brief Upscaling C2P (Milestone 7): convert source rect (x,y,w,h) of the
- *        staged chunky frame, pixel-replicated by @p scale, into the TOP-LEFT
- *        of planar slot 0 (dst origin 0,0, size w*scale x h*scale).  Used for
- *        the 2x/4x zoom view so a small centred render fills the play area.
+ * @brief Upscaling C2P (Milestone 7): nearest-neighbour-magnify source rect
+ *        (x,y,w,h) of the staged chunky frame INTO the size-9 framed view rect
+ *        (STDOOM_FRAME_VIEW_*) of planar slot 0, leaving the surrounding GRNROCK
+ *        border untouched.  Used for shrunk gameplay views smaller than size 9
+ *        so they all share the same even border, with the HUD message in the
+ *        top border.
  *
- * @param x     Source left edge in pixels (low nibble is reused for scale, so
- *              the word-aligned value must be a multiple of 16).
- * @param y     Source top edge in pixels.
- * @param w     Source width in pixels (multiple of 16).
- * @param h     Source height in pixels.
- * @param scale Magnify factor (2 or 4; 1 is equivalent to sidecart_md_c2p_rect).
+ * @param x  Source left edge in pixels (low nibble reused for the upscale flag,
+ *           so the word-aligned value must be a multiple of 16).
+ * @param y  Source top edge in pixels.
+ * @param w  Source width in pixels (multiple of 16).
+ * @param h  Source height in pixels.
  * @return 0 on success, -1 on timeout.
  */
-int sidecart_md_c2p_scaled(unsigned short x, unsigned short y,
-                           unsigned short w, unsigned short h,
-                           unsigned short scale);
+int sidecart_md_c2p_upscale(unsigned short x, unsigned short y,
+                            unsigned short w, unsigned short h);
 
 /**
  * @brief Upload the active 768-byte DOOM palette (256 x RGB) to the accelerator

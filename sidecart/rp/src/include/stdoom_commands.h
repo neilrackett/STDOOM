@@ -40,29 +40,38 @@
 #define CMD_STDOOM_BLIT_ROWS 0x13
 #define CMD_STDOOM_C2P 0x14
 /* C2P: d3=(rx<<16)|ry, d4=(rw<<16)|rh (optional rect, M3).  rx is word-aligned
- * (multiple of 16), so its spare low nibble carries an M7 magnify factor: 0/1 =
- * 1:1 convert of the rect; 2/4 = upscale the (rx,ry,rw,rh) source rect to the
- * slot-0 top-left (dst origin 0,0, size rw*scale x rh*scale). */
+ * (multiple of 16), so its spare low nibble carries an M7 magnify flag: 0/1 =
+ * 1:1 convert of the rect; >=2 = nearest-neighbour upscale the (rx,ry,rw,rh)
+ * source rect into the size-9 framed view rect (STDOOM_FRAME_VIEW_*), leaving
+ * the surrounding GRNROCK border already in the slot untouched. */
 #define CMD_STDOOM_SET_PALETTE 0x15 /* Upload 768B (256xRGB) DOOM palette (M4) */
 #define CMD_STDOOM_SET_MODE 0x16    /* d3=render mode 0..5 (M4) */
-#define CMD_STDOOM_SET_PALGEN 0x17  /* d3=palette source 0/1 (M4 Stage 3) */
+#define CMD_STDOOM_SET_PALGEN 0x17  /* d3=palette source 0..STDOOM_PALGEN_COUNT-1 */
 /* 0x18..0x1F reserved for future render offload (column/span, palette FX). */
 
-/* ── Render modes (M4) ──────────────────────────────────────────────────── */
+/* ── Render modes (dither style; M4) ────────────────────────────────────── */
 #define STDOOM_MODE_NEAREST 0
 #define STDOOM_MODE_BAYER2 1
 #define STDOOM_MODE_BAYER4 2
-#define STDOOM_MODE_GREY 3
-#define STDOOM_MODE_GREY_BAYER2 4 /* greyscale, 2x2 dither between grey levels */
-#define STDOOM_MODE_GREY_BAYER4 5 /* greyscale, 4x4 dither between grey levels */
-#define STDOOM_MODE_COUNT 6
+#define STDOOM_MODE_HALFTONE 3 /* 4x4 clustered-dot (halftone) ordered dither */
+#define STDOOM_MODE_COUNT 4
 
-/* ── Palette source (M4 Stage 3) ────────────────────────────────────────── */
-/* Where the 16 ST colours come from for nearest/Bayer modes (greyscale always
- * uses its own grey ramp regardless): the fixed hand-tuned DOOM subset, or a
- * median-cut + k-means palette generated from the uploaded 768-byte palette. */
-#define STDOOM_PALGEN_SUBSET 0
-#define STDOOM_PALGEN_GENERATED 1
+/* ── Palette source / 16-colour set (M4 Stage 3) ────────────────────────── */
+/* The 16 ST colours: a hand-tuned DOOM subset, a median-cut + k-means palette
+ * generated from the uploaded palette, a fixed famous palette, or a 16-step
+ * greyscale ramp.  The render mode (nearest/Bayer) then maps each DOOM colour
+ * to the closest of these 16 — greyscale needs no explicit luma, since the
+ * perceptual redmean reduction already weights green much like luma does. */
+#define STDOOM_PALGEN_SUBSET 0      /* fixed hand-tuned subset of DOOM colours */
+#define STDOOM_PALGEN_GENERATED 1   /* median-cut + k-means from uploaded palette */
+/* Fixed external 16-colour palettes (just for fun): the 16 ST colours are the
+ * famous palette, and each DOOM colour is mapped to its nearest entry. */
+#define STDOOM_PALGEN_EGA 2
+#define STDOOM_PALGEN_C64 3
+#define STDOOM_PALGEN_ZX 4
+#define STDOOM_PALGEN_PICO8 5
+#define STDOOM_PALGEN_GREY 6        /* 16-step greyscale ramp (g = k*17) */
+#define STDOOM_PALGEN_COUNT 7
 
 /* PING magic — the ST sends this in d3 and expects a successful token echo. */
 #define STDOOM_PING_MAGIC 0x5354444D /* 'STDM' */
@@ -90,6 +99,17 @@
 #define STDOOM_PLANAR_SIZE 32000
 #define STDOOM_PLANAR_WORDS (STDOOM_PLANAR_SIZE / 2)
 #define STDOOM_PLANAR_WORDS_PER_ROW (STDOOM_FRAME_WIDTH / 4)
+
+/* Framed-upscale target (Milestone 7): Doom's size-9 view layout — the first
+ * view size that shows the GRNROCK border (scaledviewwidth=288, viewheight=148,
+ * centred at 16,10).  Shrunk views smaller than this are nearest-neighbour
+ * upscaled INTO this rect so every size shares the same even border (which Doom
+ * already draws around the view) with the HUD message in the top border.
+ * X/W are multiples of 16 (plane-word aligned).  MUST match sidecart_md.h. */
+#define STDOOM_FRAME_VIEW_X 16
+#define STDOOM_FRAME_VIEW_Y 10
+#define STDOOM_FRAME_VIEW_W 288
+#define STDOOM_FRAME_VIEW_H 148
 
 /* Ready magic written to the ready word once the worker is up. Both bytes of
  * the bus word carry the magic so the ST sees it regardless of which half of

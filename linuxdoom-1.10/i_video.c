@@ -179,6 +179,17 @@ void I_StartTic (void)
                 sidecart_c2p_cycle_render_mode(+1);
             }
             continue;
+        } else if (scan == 0x65) { // Numeric keypad '/'
+            /* With the accelerator active, keypad '/' cycles the palette source
+             * (generated, subset, then the fixed EGA/C64/Spectrum/PICO-8
+             * palettes). On key-down only; swallow the event so it never reaches
+             * the game. Keypad '/' has no Doom binding, so swallow it on the
+             * software path too rather than letting it reach the unknown-event
+             * handler. */
+            if (c2p_md_active && event.type == ev_keydown) {
+                sidecart_c2p_toggle_palette_gen();
+            }
+            continue;
         } else if (scan == 14) {
             event.data1 = KEY_BACKSPACE;
         } else if (scan == 12) {
@@ -195,13 +206,6 @@ void I_StartTic (void)
             event.data1 = ' ';
         } else if (scan == 0x3a) {
             // Don't know how to send CAPSLOCK key
-            continue;
-        } else if (scan == 0x0b && c2p_md_active && event.type == ev_keydown) {
-            /* '0' toggles the accelerator palette source (generated <-> fixed
-             * subset) for live A/B quality comparison; swallow the key. '0' is
-             * not a weapon (weapons are 1-8) or movement key. Falls through to
-             * the normal '0' mapping when the accelerator is inactive. */
-            sidecart_c2p_toggle_palette_gen();
             continue;
         } else if (scan >= 0x2 && scan <= 0xd) {
             event.data1 = "1234567890-="[scan-0x2];

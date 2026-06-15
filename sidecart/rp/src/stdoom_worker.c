@@ -61,10 +61,44 @@ static volatile uint16_t *s_stcolors_mem;
 static uint8_t s_palgen_idx[256];
 static int s_palgen_axis;
 
-/* The 16 DOOM palette indices used as the fixed ST colour set (matches the host
- * subset_lorez[16] in atari_c2p.c, so nearest mode reproduces the M3 look). */
+/* The 16 DOOM palette indices used as the fixed ST colour set.  MUST match the
+ * host subset_lorez[16] in atari_c2p.c so the FIXED palette reproduces the
+ * software renderer's look — keep in sync if that table is retuned. */
 static const uint8_t s_subset[16] = {
-    0, 90, 101, 241, 202, 252, 38, 219, 144, 136, 158, 120, 72, 58, 249, 4};
+    0, 201, 205, 117, 123, 185, 87, 100, 60, 95, 227, 104, 69, 79, 179, 159};
+
+/* Fixed external 16-colour palettes (just for fun): the 16 ST colours become the
+ * famous palette and each DOOM colour maps to its nearest entry.  Selected via
+ * CMD_STDOOM_SET_PALGEN (STDOOM_PALGEN_EGA/C64/ZX/PICO8); combine with any
+ * nearest/Bayer render mode.  RGB 0..255 (snapped to the ST hardware palette). */
+static const uint8_t s_pal_ega[16][3] = {
+    {0, 0, 0},     {0, 0, 170},     {0, 170, 0},     {0, 170, 170},
+    {170, 0, 0},   {170, 0, 170},   {170, 85, 0},    {170, 170, 170},
+    {85, 85, 85},  {85, 85, 255},   {85, 255, 85},   {85, 255, 255},
+    {255, 85, 85}, {255, 85, 255},  {255, 255, 85},  {255, 255, 255}};
+static const uint8_t s_pal_c64[16][3] = {  /* Pepto reconstruction */
+    {0, 0, 0},       {255, 255, 255}, {104, 55, 43},   {112, 164, 178},
+    {111, 61, 134},  {88, 141, 67},   {53, 40, 121},   {184, 199, 111},
+    {111, 79, 37},   {67, 57, 0},     {154, 103, 89},  {68, 68, 68},
+    {108, 108, 108}, {154, 210, 132}, {108, 94, 181},  {149, 149, 149}};
+static const uint8_t s_pal_zx[16][3] = {   /* non-bright 0xD7, bright 0xFF; 0/8 both black */
+    {0, 0, 0},       {0, 0, 215},     {215, 0, 0},     {215, 0, 215},
+    {0, 215, 0},     {0, 215, 215},   {215, 215, 0},   {215, 215, 215},
+    {0, 0, 0},       {0, 0, 255},     {255, 0, 0},     {255, 0, 255},
+    {0, 255, 0},     {0, 255, 255},   {255, 255, 0},   {255, 255, 255}};
+static const uint8_t s_pal_pico8[16][3] = {
+    {0, 0, 0},       {29, 43, 83},    {126, 37, 83},   {0, 135, 81},
+    {171, 82, 54},   {95, 87, 79},    {194, 195, 199}, {255, 241, 232},
+    {255, 0, 77},    {255, 163, 0},   {255, 236, 39},  {0, 228, 54},
+    {41, 173, 255},  {131, 118, 156}, {255, 119, 168}, {255, 204, 170}};
+/* 16-step greyscale ramp (g = k*17, evenly spaced 0..255).  No explicit luma:
+ * the perceptual redmean reduction picks the nearest grey with green-weighting
+ * close to luma, and Bayer modes then dither between the two nearest greys. */
+static const uint8_t s_pal_grey[16][3] = {
+    {0, 0, 0},       {17, 17, 17},    {34, 34, 34},    {51, 51, 51},
+    {68, 68, 68},    {85, 85, 85},    {102, 102, 102}, {119, 119, 119},
+    {136, 136, 136}, {153, 153, 153}, {170, 170, 170}, {187, 187, 187},
+    {204, 204, 204}, {221, 221, 221}, {238, 238, 238}, {255, 255, 255}};
 
 /* Drain spurious commands the PIO/parser may latch during cold start. */
 static volatile bool s_dispatch_armed = false;
@@ -361,12 +395,6 @@ static void stdoom_kmeans(uint8_t cen[16][3]) {
   }
 }
 
-/* Rec.601 luma (0..255) of an 8-bit RGB triple. */
-static uint8_t stdoom_luma(uint8_t r, uint8_t g, uint8_t b) {
-  return (uint8_t)(((uint32_t)r * 77u + (uint32_t)g * 150u +
-                    (uint32_t)b * 29u) >> 8);
-}
-
 /* 4x4 ordered-dither thresholds, indexed by Bayer cell ((y&3)<<2)|(x&3).
  * Values 0..15 (matches the host bayer[4][4] in atari_c2p.c). */
 static const uint8_t s_bayer4[16] = {
@@ -376,12 +404,22 @@ static const uint8_t s_bayer4[16] = {
  * same 0..15 space as the 4x4 matrix (values 2,10,14,6). */
 static const uint8_t s_bayer2[4] = {2, 10, 14, 6};
 
+/* 4x4 clustered-dot (halftone) thresholds, indexed by cell ((y&3)<<2)|(x&3): a
+ * dot grows outward from the centre of each 4x4 cell (spiral from the inner
+ * 2x2), giving a "newspaper print" look instead of Bayer's dispersed
+ * cross-hatch. */
+static const uint8_t s_halftone[16] = {
+    6, 7, 8, 9, 5, 0, 1, 10, 4, 3, 2, 11, 15, 14, 13, 12};
+
 /* Threshold (0..15) for a 4x4 Bayer cell in the requested mode. */
 static uint8_t stdoom_dither_threshold(int mode, uint8_t cell) {
   if (mode == STDOOM_MODE_BAYER2) {
     uint8_t row2 = (uint8_t)((cell >> 2) & 1u);
     uint8_t col2 = (uint8_t)(cell & 1u);
     return s_bayer2[(row2 << 1) | col2];
+  }
+  if (mode == STDOOM_MODE_HALFTONE) {
+    return s_halftone[cell & 15u];
   }
   return s_bayer4[cell & 15u];
 }
@@ -414,8 +452,26 @@ static void stdoom_set_refs_from_rgb(const uint8_t src[16][3]) {
 static void stdoom_build_refs(void) {
   uint8_t pal[16][3];
   uint8_t k;
+  const uint8_t (*fixed)[3] = NULL;
 
-  if (s_palette_gen == STDOOM_PALGEN_GENERATED) {
+  switch (s_palette_gen) {
+    case STDOOM_PALGEN_EGA:   fixed = s_pal_ega;   break;
+    case STDOOM_PALGEN_C64:   fixed = s_pal_c64;   break;
+    case STDOOM_PALGEN_ZX:    fixed = s_pal_zx;    break;
+    case STDOOM_PALGEN_PICO8: fixed = s_pal_pico8; break;
+    case STDOOM_PALGEN_GREY:  fixed = s_pal_grey;  break;
+    default:                  fixed = NULL;        break;
+  }
+
+  if (fixed != NULL) {
+    /* Fixed external palette: the 16 ST colours are the famous palette itself;
+     * the nearest/Bayer LUT then maps each DOOM colour to its closest entry. */
+    for (k = 0; k < 16u; k++) {
+      pal[k][0] = fixed[k][0];
+      pal[k][1] = fixed[k][1];
+      pal[k][2] = fixed[k][2];
+    }
+  } else if (s_palette_gen == STDOOM_PALGEN_GENERATED) {
     stdoom_median_cut(pal);
     stdoom_kmeans(pal);
   } else {
@@ -430,61 +486,20 @@ static void stdoom_build_refs(void) {
 }
 
 /* Rebuild the 16 chosen ST colours and the per-cell reduction LUT for the
- * current render mode, from the last uploaded palette (s_palette_rgb).
+ * current palette source + render mode, from the last uploaded palette.
  *
- * NEAREST/BAYER2/BAYER4 use the fixed s_subset[] palette (matching the M3
- * look); GREY / GREY_BAYER2 / GREY_BAYER4 generate their own 16-step grey ramp.
- * Bayer modes do a classic 2-colour ordered dither between each DOOM colour's
- * nearest and second-nearest ST colours, thresholded per Bayer cell; the
- * greyscale Bayer modes dither between the two adjacent grey levels instead, to
- * give a larger effective grey palette and reduce banding. (Median-cut palette
- * generation is Stage 3.) */
+ * stdoom_build_refs() fills the 16 reference colours (hand-tuned subset,
+ * generated median-cut+k-means, a fixed famous palette, or the greyscale ramp).
+ * NEAREST maps each DOOM colour to its nearest reference; BAYER2/BAYER4 do a
+ * classic 2-colour ordered dither between each colour's nearest and
+ * second-nearest references, thresholded per Bayer cell.  With the greyscale
+ * palette this naturally dithers between the two adjacent grey levels. */
 static void stdoom_build_palette_and_lut(void) {
-  if (s_render_mode == STDOOM_MODE_GREY ||
-      s_render_mode == STDOOM_MODE_GREY_BAYER2 ||
-      s_render_mode == STDOOM_MODE_GREY_BAYER4) {
-    /* Greyscale Bayer variants dither between adjacent grey levels; pick the
-     * matching 2x2/4x4 threshold matrix (plain GREY does no dither). */
-    int grey_dither = (s_render_mode != STDOOM_MODE_GREY);
-    int bayer_mode = (s_render_mode == STDOOM_MODE_GREY_BAYER2)
-                         ? STDOOM_MODE_BAYER2
-                         : STDOOM_MODE_BAYER4;
-
-    /* 16-step grey ramp: level k -> grey value k*17 (0..255). */
-    for (uint8_t k = 0; k < 16u; k++) {
-      uint8_t v = (uint8_t)(k * 17u);
-      s_ref_rgb[k][0] = v;
-      s_ref_rgb[k][1] = v;
-      s_ref_rgb[k][2] = v;
-      s_st_colors[k] = stdoom_st_color_word(v, v, v);
-    }
-    for (uint32_t i = 0; i < 256u; i++) {
-      const uint8_t *c = &s_palette_rgb[i * 3u];
-      uint8_t y = stdoom_luma(c[0], c[1], c[2]);
-      if (!grey_dither) {
-        uint8_t level = (uint8_t)(((uint32_t)y * 15u + 127u) / 255u);
-        for (uint8_t cell = 0; cell < 16u; cell++) {
-          s_mode_lut[cell][i] = level;
-        }
-      } else {
-        /* Grey levels are evenly spaced 17 apart, so the luma maps to a lower
-         * level lo and a 0..16 fraction towards lo+1; dither on that fraction. */
-        uint8_t lo = (uint8_t)(y / 17u);                 /* 0..15 */
-        uint8_t hi = (uint8_t)((lo < 15u) ? lo + 1u : 15u);
-        int t16 = (int)y - (int)((uint16_t)lo * 17u);    /* 0..16 */
-        for (uint8_t cell = 0; cell < 16u; cell++) {
-          uint8_t thr = stdoom_dither_threshold(bayer_mode, cell);
-          s_mode_lut[cell][i] = (uint8_t)((t16 > (int)thr) ? hi : lo);
-        }
-      }
-    }
-    return;
-  }
-
   stdoom_build_refs();
 
   if (s_render_mode == STDOOM_MODE_BAYER2 ||
-      s_render_mode == STDOOM_MODE_BAYER4) {
+      s_render_mode == STDOOM_MODE_BAYER4 ||
+      s_render_mode == STDOOM_MODE_HALFTONE) {
     for (uint32_t i = 0; i < 256u; i++) {
       const uint8_t *c = &s_palette_rgb[i * 3u];
       uint8_t a, b;
@@ -598,48 +613,58 @@ static void stdoom_pack_to_planar_rect(uint16_t rx, uint16_t ry,
   }
 }
 
-/* Upscaling C2P (Milestone 7): read source rect (sx,sy,sw,sh) from the staged
- * chunky frame and write a pixel-replicated scale*-magnified planar rect to the
- * TOP-LEFT of slot 0 (dst origin 0,0, size sw*scale x sh*scale).  Mirrors the
- * software zoom path (c2p_screen_lorez): a small centred view fills the 320x168
- * play area, so the GRNROCK border the host renders is never read.
+/* Upscaling C2P (Milestone 7): read the small centred source rect (sx,sy,sw,sh)
+ * from the staged chunky frame and write a nearest-neighbour-magnified planar
+ * rect INTO the fixed size-9 framed view rect (STDOOM_FRAME_VIEW_*), leaving the
+ * rest of slot 0 — including the surrounding GRNROCK border the host already
+ * C2P'd on the last border-burst — untouched.  Mirrors the software zoom look:
+ * every shrunk view shares the size-9 frame, with the HUD message sitting in
+ * the top border above the view.
  *
- * scale is a power of two (2 or 4); use a shift so the RP2040 (no hardware
- * divide) maps output->source coords cheaply.  The Bayer LUT cell is taken from
- * the OUTPUT coords (oy&3)<<2 | (ox&3), matching the software c2p_2x/4x tables.
+ * Arbitrary (per-axis, possibly fractional) scale via a 16.16 fixed-point step,
+ * so every shrunk view size maps into the frame.  Two divides per frame (one
+ * per axis); the per-pixel map is a multiply+shift (cheap on the RP2040, and
+ * the whole convert is hidden behind the upload anyway).
  *
- * dst x is always 0 (16-aligned) so plane-word packing is unaffected; the host
- * then blits the full-width 320 x (sh*scale) rect with the linear blitter. */
-static void stdoom_pack_to_planar_scaled(uint16_t sx, uint16_t sy,
-                                         uint16_t sw, uint16_t sh,
-                                         uint8_t scale) {
+ * The Bayer LUT cell is taken from the OUTPUT (screen) coords
+ * ((dst_y+oy)&3)<<2 | (ox&3), so the dither matrix tiles consistently with the
+ * rest of the screen.  dst_x is a multiple of 16 so plane-word packing is
+ * unaffected; the border columns/rows outside the view are never written. */
+static void stdoom_pack_to_planar_upscale(uint16_t sx, uint16_t sy,
+                                          uint16_t sw, uint16_t sh) {
   uint16_t words_per_row = (uint16_t)(s_frame_width / 4u);
-  uint8_t shift = (scale >= 4u) ? 2u : 1u;       /* scale 2->1, 4->2 */
-  uint16_t dst_w = (uint16_t)(sw << shift);
-  uint16_t dst_h = (uint16_t)(sh << shift);
+  uint16_t dst_x = STDOOM_FRAME_VIEW_X;
+  uint16_t dst_y = STDOOM_FRAME_VIEW_Y;
+  uint16_t dst_w = STDOOM_FRAME_VIEW_W;
+  uint16_t dst_h = STDOOM_FRAME_VIEW_H;
+  uint16_t blk_start = (uint16_t)(dst_x / 16u);
   uint16_t blk_count = (uint16_t)(dst_w / 16u);
   uint16_t *planar_base = (uint16_t *)s_planar_mem;
 
-  if (dst_w > s_frame_width)   dst_w = s_frame_width;
-  if (dst_h > s_frame_height)  dst_h = s_frame_height;
+  /* Source pixels per output pixel, 16.16 fixed point.  Guard against 0 dims. */
+  uint32_t x_step = (dst_w != 0u) ? (((uint32_t)sw << 16) / dst_w) : 0u;
+  uint32_t y_step = (dst_h != 0u) ? (((uint32_t)sh << 16) / dst_h) : 0u;
 
   for (uint16_t oy = 0; oy < dst_h; oy++) {
-    const uint8_t *src_row =
-        &s_chunky_frame[(uint32_t)(sy + (oy >> shift)) * s_chunky_pitch];
-    uint16_t *dst_row = planar_base + (uint32_t)oy * words_per_row;
-    uint8_t y_cell = (uint8_t)((oy & 3u) << 2);
+    uint16_t src_y = (uint16_t)(sy + (uint16_t)(((uint32_t)oy * y_step) >> 16));
+    const uint8_t *src_row = &s_chunky_frame[(uint32_t)src_y * s_chunky_pitch];
+    uint16_t *dst_row = planar_base + (uint32_t)(dst_y + oy) * words_per_row;
+    uint8_t y_cell = (uint8_t)(((dst_y + oy) & 3u) << 2);
 
-    for (uint16_t blk = 0; blk < blk_count; blk++) {
+    for (uint16_t blk = blk_start; blk < blk_start + blk_count; blk++) {
       uint16_t plane0 = 0;
       uint16_t plane1 = 0;
       uint16_t plane2 = 0;
       uint16_t plane3 = 0;
-      uint16_t x0 = (uint16_t)(blk * 16u);
+      uint16_t x0 = (uint16_t)(blk * 16u);  /* global output x of this block */
 
       for (uint16_t px = 0; px < 16u; px++) {
-        uint16_t ox = (uint16_t)(x0 + px);
+        uint16_t ox = (uint16_t)(x0 + px);               /* global output x */
+        uint16_t ox_local = (uint16_t)(ox - dst_x);      /* 0..dst_w-1 */
+        uint16_t src_x =
+            (uint16_t)(sx + (uint16_t)(((uint32_t)ox_local * x_step) >> 16));
         uint8_t cell = (uint8_t)(y_cell | (ox & 3u));
-        uint8_t mapped = s_mode_lut[cell][src_row[sx + (ox >> shift)]] & 0x0Fu;
+        uint8_t mapped = s_mode_lut[cell][src_row[src_x]] & 0x0Fu;
         uint16_t bit = (uint16_t)(1u << (15u - px));
         if (mapped & 0x1u) plane0 |= bit;
         if (mapped & 0x2u) plane1 |= bit;
@@ -857,10 +882,11 @@ static void stdoom_dispatch_command(const TransmissionProtocol *proto) {
       uint16_t ry = 0;
       uint16_t rw = s_frame_width;
       uint16_t rh = s_frame_height;
-      /* Magnify factor (Milestone 7) carried in the spare low nibble of rx,
+      /* Magnify flag (Milestone 7) carried in the spare low nibble of rx,
        * which is otherwise forced to a multiple of 16.  0/1 = no scaling
-       * (1:1 rect, the M3 path); 2/4 = upscale the source rect to the screen
-       * top-left.  Keeps sidecart_stubs.S unchanged (no extra register). */
+       * (1:1 rect, the M3 path); >=2 = upscale the source rect (nearest
+       * neighbour) to fill the play area at the screen top-left.  Keeps
+       * sidecart_stubs.S unchanged (no extra register). */
       uint8_t scale = 0;
 
       if (proto->payload_size >= 12u) {
@@ -889,7 +915,7 @@ static void stdoom_dispatch_command(const TransmissionProtocol *proto) {
 
       *s_status_mem = STDOOM_BUS_BYTE_WORD(STDOOM_STATUS_BUSY);
       if (scale > 1u) {
-        stdoom_pack_to_planar_scaled(rx, ry, rw, rh, scale);
+        stdoom_pack_to_planar_upscale(rx, ry, rw, rh);
       } else {
         stdoom_pack_to_planar_rect(rx, ry, rw, rh);
       }
@@ -969,7 +995,7 @@ static void stdoom_dispatch_command(const TransmissionProtocol *proto) {
       }
       d3 = ((uint32_t)params16[1] << 16) | params16[0];
       gen = (int)(d3 & 0xFFFFu);
-      if (gen != STDOOM_PALGEN_SUBSET && gen != STDOOM_PALGEN_GENERATED) {
+      if (gen < 0 || gen >= STDOOM_PALGEN_COUNT) {
         gen = STDOOM_PALGEN_GENERATED;
       }
 

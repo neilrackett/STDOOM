@@ -25,8 +25,7 @@
 #define CELL_H 12u  /* rows are scaled to fill 200 (see fill_grid_frame)        */
 
 static const char *s_mode_names[STDOOM_MODE_COUNT] = {
-    "NEAREST",   "2x2 BAYER",     "4x4 BAYER",
-    "GREYSCALE", "GREY 2x2 BAYER", "GREY 4x4 BAYER"};
+    "NEAREST", "2x2 BAYER", "4x4 BAYER", "HALFTONE"};
 
 static const char *s_palgen_names[2] = {"FIXED", "GENERATED"};
 
