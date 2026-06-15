@@ -23,10 +23,8 @@ Without DOOM Accelerator, it's just regular STDOOM and will most likely be unpla
 - Put a WAD file like `DOOM1.WAD` next to it.
 - Start `STDOOM.TOS`.
 - Use keyboard or mouse for control, just as in the original game.
-- If you have a system with at least a Motorola 68020 CPU but no FPU, you can use the `STDOOM20.TOS` executable.
-- If you have a system with at least a Motorola 68020 with FPU, you can use the `STDOOM2F.TOS` executable.
 
-TOS files and microfirmware are available from the [releases page](https://github.com/neilrackett/atarist-stdoom/releases).
+TOS file and microfirmware are available from the [releases page](https://github.com/neilrackett/atarist-stdoom/releases).
 
 ## Features
 
