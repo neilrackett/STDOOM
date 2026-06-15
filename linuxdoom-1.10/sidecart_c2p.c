@@ -285,6 +285,11 @@ static void c2p_screen_md(unsigned char *out, const unsigned char *in)
             unsigned short vy = (unsigned short)viewwindowy;
             unsigned short vw = (unsigned short)scaledviewwidth;
             unsigned short vh = (unsigned short)viewheight;
+            /* M7 magnify factor: exactly 160px -> 2x, 80px -> 4x (the two view
+             * sizes the software path zooms cleanly); any other width stays 1:1
+             * (today's in-place partial path, with the GRNROCK border). */
+            unsigned short scale = (vw == SCREENWIDTH / 2) ? 2
+                                 : (vw == SCREENWIDTH / 4) ? 4 : 1;
 
             /* Border-frame detection.  When the view is shrunk
              * (scaledviewwidth < 320) Doom draws the GRNROCK border around the
@@ -300,6 +305,32 @@ static void c2p_screen_md(unsigned char *out, const unsigned char *in)
              * correct. */
             static unsigned short s_pvx, s_pvy, s_pvw, s_pvh;
             static int s_border_full_frames;
+
+            /* Magnified zoom (M7): upload only the small centred view (the same
+             * rows the 1:1 partial path already uploads — no extra upload
+             * cost), have the RP2040 upscale it to fill the 320 x (vh*scale)
+             * play area, and copy it full-width via the linear-blit fast path.
+             * No border burst is needed: the whole play area is overwritten.
+             * The status bar is left to c2p_statusbar_md (c2p_md_frame_offloaded
+             * stays 0). */
+            if (scale > 1)
+            {
+                s_prev_in_partial_branch = 1;
+                if (upload_rows((short)vy, (short)vh, in) != 0)
+                {
+                    c2p_screen_lorez(out, in);
+                    return;
+                }
+                if (sidecart_md_c2p_scaled(vx, vy, vw, vh, scale) != 0)
+                {
+                    c2p_screen_lorez(out, in);
+                    return;
+                }
+                sidecart_md_copy_planar_to_screen(
+                    (unsigned long)STDOOM_PLANAR0_ADDR, out, 0, 0,
+                    STDOOM_FRAME_WIDTH, (unsigned short)(vh * scale));
+                return;
+            }
 
             if (!s_prev_in_partial_branch ||
                 vx != s_pvx || vy != s_pvy || vw != s_pvw || vh != s_pvh)

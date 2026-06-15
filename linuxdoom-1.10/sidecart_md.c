@@ -352,6 +352,17 @@ int sidecart_md_c2p(void) {
   return sidecart_md_c2p_rect(0, 0, STDOOM_FRAME_WIDTH, STDOOM_FRAME_HEIGHT);
 }
 
+int sidecart_md_c2p_scaled(unsigned short x, unsigned short y,
+                           unsigned short w, unsigned short h,
+                           unsigned short scale) {
+  /* Magnify factor rides in the spare low nibble of x (word-aligned), so the
+   * d3/d4 layout and payload size are unchanged (see CMD_STDOOM_C2P doc). */
+  return sidecart_md_send_sync_command_once(
+      CMD_STDOOM_C2P, 8,
+      ((long)(((unsigned)x & ~15u) | ((unsigned)scale & 15u)) << 16) | (long)y,
+      ((long)w << 16) | (long)h);
+}
+
 int sidecart_md_set_palette(const unsigned char *rgb768) {
   if (!rgb768) {
     return -1;

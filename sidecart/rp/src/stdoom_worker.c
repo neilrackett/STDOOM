@@ -598,6 +598,63 @@ static void stdoom_pack_to_planar_rect(uint16_t rx, uint16_t ry,
   }
 }
 
+/* Upscaling C2P (Milestone 7): read source rect (sx,sy,sw,sh) from the staged
+ * chunky frame and write a pixel-replicated scale*-magnified planar rect to the
+ * TOP-LEFT of slot 0 (dst origin 0,0, size sw*scale x sh*scale).  Mirrors the
+ * software zoom path (c2p_screen_lorez): a small centred view fills the 320x168
+ * play area, so the GRNROCK border the host renders is never read.
+ *
+ * scale is a power of two (2 or 4); use a shift so the RP2040 (no hardware
+ * divide) maps output->source coords cheaply.  The Bayer LUT cell is taken from
+ * the OUTPUT coords (oy&3)<<2 | (ox&3), matching the software c2p_2x/4x tables.
+ *
+ * dst x is always 0 (16-aligned) so plane-word packing is unaffected; the host
+ * then blits the full-width 320 x (sh*scale) rect with the linear blitter. */
+static void stdoom_pack_to_planar_scaled(uint16_t sx, uint16_t sy,
+                                         uint16_t sw, uint16_t sh,
+                                         uint8_t scale) {
+  uint16_t words_per_row = (uint16_t)(s_frame_width / 4u);
+  uint8_t shift = (scale >= 4u) ? 2u : 1u;       /* scale 2->1, 4->2 */
+  uint16_t dst_w = (uint16_t)(sw << shift);
+  uint16_t dst_h = (uint16_t)(sh << shift);
+  uint16_t blk_count = (uint16_t)(dst_w / 16u);
+  uint16_t *planar_base = (uint16_t *)s_planar_mem;
+
+  if (dst_w > s_frame_width)   dst_w = s_frame_width;
+  if (dst_h > s_frame_height)  dst_h = s_frame_height;
+
+  for (uint16_t oy = 0; oy < dst_h; oy++) {
+    const uint8_t *src_row =
+        &s_chunky_frame[(uint32_t)(sy + (oy >> shift)) * s_chunky_pitch];
+    uint16_t *dst_row = planar_base + (uint32_t)oy * words_per_row;
+    uint8_t y_cell = (uint8_t)((oy & 3u) << 2);
+
+    for (uint16_t blk = 0; blk < blk_count; blk++) {
+      uint16_t plane0 = 0;
+      uint16_t plane1 = 0;
+      uint16_t plane2 = 0;
+      uint16_t plane3 = 0;
+      uint16_t x0 = (uint16_t)(blk * 16u);
+
+      for (uint16_t px = 0; px < 16u; px++) {
+        uint16_t ox = (uint16_t)(x0 + px);
+        uint8_t cell = (uint8_t)(y_cell | (ox & 3u));
+        uint8_t mapped = s_mode_lut[cell][src_row[sx + (ox >> shift)]] & 0x0Fu;
+        uint16_t bit = (uint16_t)(1u << (15u - px));
+        if (mapped & 0x1u) plane0 |= bit;
+        if (mapped & 0x2u) plane1 |= bit;
+        if (mapped & 0x4u) plane2 |= bit;
+        if (mapped & 0x8u) plane3 |= bit;
+      }
+
+      dst_row[(blk * 4u) + 0u] = plane0;
+      dst_row[(blk * 4u) + 1u] = plane1;
+      dst_row[(blk * 4u) + 2u] = plane2;
+      dst_row[(blk * 4u) + 3u] = plane3;
+    }
+  }
+}
+
 static bool stdoom_diag_should_log(uint32_t count) {
   return count < 4u || (count % 120u) == 0u;
 }
@@ -800,11 +857,18 @@ static void stdoom_dispatch_command(const TransmissionProtocol *proto) {
       uint16_t ry = 0;
       uint16_t rw = s_frame_width;
       uint16_t rh = s_frame_height;
+      /* Magnify factor (Milestone 7) carried in the spare low nibble of rx,
+       * which is otherwise forced to a multiple of 16.  0/1 = no scaling
+       * (1:1 rect, the M3 path); 2/4 = upscale the source rect to the screen
+       * top-left.  Keeps sidecart_stubs.S unchanged (no extra register). */
+      uint8_t scale = 0;
 
       if (proto->payload_size >= 12u) {
         uint32_t d3 = ((uint32_t)params16[1] << 16) | params16[0];
         uint32_t d4 = ((uint32_t)params16[3] << 16) | params16[2];
-        rx = (uint16_t)(d3 >> 16) & ~15u;
+        uint16_t raw_rx = (uint16_t)(d3 >> 16);
+        scale = (uint8_t)(raw_rx & 15u);
+        rx = (uint16_t)(raw_rx & ~15u);
         ry = (uint16_t)(d3 & 0xFFFFu);
         rw = (uint16_t)(d4 >> 16);
         rh = (uint16_t)(d4 & 0xFFFFu);
@@ -817,13 +881,18 @@ static void stdoom_dispatch_command(const TransmissionProtocol *proto) {
 
       s_diag_c2p_count++;
       if (stdoom_diag_should_log(s_diag_c2p_count)) {
-        DPRINTF("stdoom_dispatch: C2P #%lu rx=%u ry=%u rw=%u rh=%u\n",
+        DPRINTF("stdoom_dispatch: C2P #%lu rx=%u ry=%u rw=%u rh=%u scale=%u\n",
                 (unsigned long)s_diag_c2p_count,
-                (unsigned)rx, (unsigned)ry, (unsigned)rw, (unsigned)rh);
+                (unsigned)rx, (unsigned)ry, (unsigned)rw, (unsigned)rh,
+                (unsigned)scale);
       }
 
       *s_status_mem = STDOOM_BUS_BYTE_WORD(STDOOM_STATUS_BUSY);
-      stdoom_pack_to_planar_rect(rx, ry, rw, rh);
+      if (scale > 1u) {
+        stdoom_pack_to_planar_scaled(rx, ry, rw, rh, scale);
+      } else {
+        stdoom_pack_to_planar_rect(rx, ry, rw, rh);
+      }
       *s_status_mem = STDOOM_BUS_BYTE_WORD(STDOOM_STATUS_DONE);
       stdoom_send_response(random_token);
       break;

@@ -39,6 +39,10 @@
 #define CMD_STDOOM_SET_MAP 0x12
 #define CMD_STDOOM_BLIT_ROWS 0x13
 #define CMD_STDOOM_C2P 0x14
+/* C2P: d3=(rx<<16)|ry, d4=(rw<<16)|rh (optional rect, M3).  rx is word-aligned
+ * (multiple of 16), so its spare low nibble carries an M7 magnify factor: 0/1 =
+ * 1:1 convert of the rect; 2/4 = upscale the (rx,ry,rw,rh) source rect to the
+ * slot-0 top-left (dst origin 0,0, size rw*scale x rh*scale). */
 #define CMD_STDOOM_SET_PALETTE 0x15 /* Upload 768B (256xRGB) DOOM palette (M4) */
 #define CMD_STDOOM_SET_MODE 0x16    /* d3=render mode 0..5 (M4) */
 #define CMD_STDOOM_SET_PALGEN 0x17  /* d3=palette source 0/1 (M4 Stage 3) */

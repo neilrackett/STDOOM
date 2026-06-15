@@ -151,6 +151,24 @@ int sidecart_md_c2p_rect(unsigned short x, unsigned short y,
 int sidecart_md_c2p(void);
 
 /**
+ * @brief Upscaling C2P (Milestone 7): convert source rect (x,y,w,h) of the
+ *        staged chunky frame, pixel-replicated by @p scale, into the TOP-LEFT
+ *        of planar slot 0 (dst origin 0,0, size w*scale x h*scale).  Used for
+ *        the 2x/4x zoom view so a small centred render fills the play area.
+ *
+ * @param x     Source left edge in pixels (low nibble is reused for scale, so
+ *              the word-aligned value must be a multiple of 16).
+ * @param y     Source top edge in pixels.
+ * @param w     Source width in pixels (multiple of 16).
+ * @param h     Source height in pixels.
+ * @param scale Magnify factor (2 or 4; 1 is equivalent to sidecart_md_c2p_rect).
+ * @return 0 on success, -1 on timeout.
+ */
+int sidecart_md_c2p_scaled(unsigned short x, unsigned short y,
+                           unsigned short w, unsigned short h,
+                           unsigned short scale);
+
+/**
  * @brief Upload the active 768-byte DOOM palette (256 x RGB) to the accelerator
  *        (M4). The firmware reduces it to 16 ST colours for the current mode and
  *        publishes them; read them back with sidecart_md_get_st_colors().
