@@ -46,6 +46,7 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
 #endif
 #include "i_system.h"
 #include "m_argv.h"
+#include "atari_sfp004.h"
 
 void atari_enable_megaste_turbo(void);
 void atari_restore_megaste_turbo(void);
@@ -126,6 +127,12 @@ void I_Init (void)
     super_ret = Super(0L);
     old_super_stack = super_ret;
     super_enabled = 1;
+    /* Arm SFP-004 68882 FixedDiv dispatch (on by default; validated on hardware).
+     * Now in supervisor (and staying) so the CIR is reachable. -nofpu forces the
+     * software FixedDiv, e.g. for A/B framerate comparison via -timedemo.
+     * R_Init/P_Init ran earlier in user mode and correctly used the software path. */
+    if (!M_CheckParm("-nofpu"))
+        sfp004_arm();
     if (!M_CheckParm("-nomste16"))
         atari_enable_megaste_turbo();
     I_InitSound();

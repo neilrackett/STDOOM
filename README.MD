@@ -7,14 +7,19 @@
 
 ## Introduction
 
-This is an experiment by [Neil Rackett](https://x.com/neilrackett) to see if it's possible to harness the raw power of a SidecarTridge Multi-device to make [STDOOM](https://github.com/indyjo/STDOOM) playable on a stock Atari ST.
+This is an experiment by [Neil Rackett](https://x.com/neilrackett) to see if it's possible to combine Mega STE optimisations and the raw power of a SidecarTridge Multi-device to make [STDOOM](https://github.com/indyjo/STDOOM) playable on real Atari ST hardware.
 
 ## System requirements
 
 - Atari ST with at least 4MB of RAM.
-- [SidecarTridge Multi-device](https://sidecartridge.com) with [DOOM Accelerator](sidecart/README.md).
 
-Without DOOM Accelerator, it's just regular STDOOM and will most likely be unplayably slow on an 8MHz ST.
+Optional performance boosters:
+
+- [SidecarTridge Multi-device](https://sidecartridge.com) with [DOOM Accelerator](sidecart/README.md).
+- Atari Mega STE (uses 16MHz + cache if available)
+- 68881 or 68882 FPU (supports SFP-004 memory mapped FPU)
+
+Without these, it's just regular STDOOM and will most likely be unplayably slow on an 8MHz ST.
 
 ## How to play
 

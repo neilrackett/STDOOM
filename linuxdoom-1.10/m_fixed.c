@@ -37,6 +37,8 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
 #endif
 #include "m_fixed.h"
 
+#include "atari_sfp004.h"
+
 
 #ifndef __HAVE_68881__
 
@@ -206,6 +208,14 @@ FixedDiv
 ( fixed_t	a,
   fixed_t	b )
 {
+    /* SFP-004 68882 path: ~1.7-2.2x faster than the integer long-division below
+     * on a memory-mapped FPU. sfp004_active() is only true once I_Init has
+     * entered supervisor mode (R_Init/P_Init's earlier user-mode FixedDiv calls
+     * fall through to the software path). sfp004_fixdiv is bit-exact (truncate
+     * toward zero) with this routine — required so demos stay in sync. */
+    if (sfp004_active())
+        return (fixed_t)sfp004_fixdiv((long)a, (long)b);
+
     if ( (abs(a)>>14) >= abs(b))
         return (a^b)<0 ? MININT : MAXINT;
 #ifndef __HAVE_68881__

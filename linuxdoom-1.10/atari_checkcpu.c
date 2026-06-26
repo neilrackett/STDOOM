@@ -1,6 +1,8 @@
 #include <mint/osbind.h>
 #include <mint/cookie.h>
 
+#include "atari_sfp004.h"
+
 #pragma GCC diagnostic ignored "-Wunused-value"
 
 #ifndef C__MCH
@@ -140,6 +142,12 @@ void _checkcpu() {
     } else {
         Cconws("FPU type not detected\r\n");
     }
+
+    /* Latch the optional memory-mapped 68882 dispatch path (soft-float fallback
+     * when absent — see atari_sfp004.c). */
+    sfp004_init();
+    if (sfp004_available())
+        Cconws("SFP-004 FPU dispatch enabled\r\n");
 
     char sufficient = 1;
     #ifdef __HAVE_68881__

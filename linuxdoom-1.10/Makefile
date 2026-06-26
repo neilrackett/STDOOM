@@ -18,9 +18,14 @@ FASTCALLFLAG=
 LIBVARIANT=
 endif
 
-CFLAGS=-O3 -Wall -DNORMALUNIX -DLINUX -D__BIG_ENDIAN__ -DUSEASM $(FASTCALLFLAG) -std=c99 -fasm
+# SFP-004 FPU library lives in the atarist-sfp004 submodule. -I makes
+# #include "atari_sfp004.h" resolve; the vpath below lets the %.o rules find
+# atari_sfp004.c there (OBJS still lists a flat $(OBJDIR)/atari_sfp004.o).
+CFLAGS=-O3 -Wall -DNORMALUNIX -DLINUX -D__BIG_ENDIAN__ -DUSEASM $(FASTCALLFLAG) -std=c99 -fasm -Iatarist-sfp004
 CFLAGS20=$(CFLAGS) -m68020-60 -mtune=68020 -msoft-float
 CFLAGS2F=$(CFLAGS) -m68020-60 -mtune=68020 -m68881
+
+vpath %.c atarist-sfp004
 LDFLAGS= -Wl,-Map=$@.map
 LDLIBS=./deps/68000.soft-float$(LIBVARIANT)/libm.a
 LDLIBS20=./deps/68020-60.soft-float$(LIBVARIANT)/libm.a
@@ -40,6 +45,7 @@ TARGET2F=STDOOM2F$(EXT)
 OBJS=				\
 		$(OBJDIR)/atari_c2p.o		\
 		$(OBJDIR)/atari_checkcpu.o	\
+		$(OBJDIR)/atari_sfp004.o	\
 		$(OBJDIR)/atari_ym.o		\
 		$(OBJDIR)/sidecart_c2p.o	\
 		$(OBJDIR)/sidecart_md.o		\
