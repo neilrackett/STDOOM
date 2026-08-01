@@ -1,6 +1,6 @@
 # STDOOM MD
 
-[STDOOM](https://github.com/indyjo/STDOOM) + [DOOM Accelerator](sidecart/README.md) = STDOOM MD
+[STDOOM](https://github.com/indyjo/STDOOM) + [DOOM Accelerator](sidecart/README.md) = Playable on a real ST?
 
 ![title screen](titlepic.png)
 ![screenshot](screen1.png)
