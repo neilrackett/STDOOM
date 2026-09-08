@@ -7,7 +7,7 @@
 
 ## Introduction
 
-This is an experiment by [Neil Rackett](https://x.com/neilrackett) to see if it's possible to combine Mega STE optimisations and the raw power of a SidecarTridge Multi-device to make [STDOOM](https://github.com/indyjo/STDOOM) playable on real Atari ST hardware.
+This is an experiment by [Neil Rackett](https://x.com/neilrackett) to see if it's possible to combine Mega STE optimisations and the raw power of a SidecarTridge Multi-device to make Jonas Eschenburg's [STDOOM](https://github.com/indyjo/STDOOM) playable on real Atari ST hardware.
 
 ## System requirements
 
